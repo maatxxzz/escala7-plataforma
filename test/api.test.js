@@ -124,3 +124,16 @@ test('criptografia detecta alteração de dados e chave incorreta sem sobrescrev
  process.env.DATA_KEY_FILE=path.join(data,'wrong.key');writeFileSync(process.env.DATA_KEY_FILE,Buffer.alloc(32,42));
  try{assert.throws(()=>encryption(data,vaultDb,false));assert.equal(vaultDb.prepare('SELECT name FROM leads').get().name,original);}finally{if(old===undefined)delete process.env.DATA_KEY_FILE;else process.env.DATA_KEY_FILE=old;vaultDb.close();}
 });
+test('ficha do cliente mantém todas as observações, criptografadas e isoladas por conta',async()=>{
+ cookie=undefined;csrf=undefined;
+ const demo=await request('/demo','POST',{});cookie=demo.headers.get('set-cookie').split(';')[0];csrf=demo.data.csrf;
+ const lead=(await request('/bootstrap')).data.leads[0],originalContext=lead.notes;
+ assert.equal((await request('/leads/'+lead.id,'PATCH',{action:'observation',notes:'   '})).status,400);
+ assert.equal((await request('/leads/'+lead.id,'PATCH',{action:'observation',notes:'Sem autorização'},{'X-CSRF-Token':'invalid'})).status,403);
+ for(let i=0;i<35;i++)assert.equal((await request('/leads/'+lead.id,'PATCH',{action:'observation',notes:`Observação privada ${i}\nPróximo passo: conversar.`})).status,200);
+ const record=await request('/leads/'+lead.id);assert.equal(record.status,200);assert.equal(record.data.history.length,35);assert.equal(record.data.history[0].detail,'Observação privada 34\nPróximo passo: conversar.');assert.equal(record.data.history[34].detail,'Observação privada 0\nPróximo passo: conversar.');assert.equal(record.data.lead.notes,originalContext);
+ const boot=await request('/bootstrap');assert.equal(boot.data.activities[0].detail,record.data.history[0].detail);
+ const database=new DatabaseSync(path.join(data,'escala7.sqlite'));try{const rows=database.prepare("SELECT detail FROM activities WHERE lead_id=? AND kind='observation'").all(lead.id);assert.equal(rows.length,35);assert.ok(rows.every(row=>row.detail.startsWith('e7:v1:')&&!row.detail.includes('Observação privada')));}finally{database.close();}
+ const other=await request('/demo','POST',{});cookie=other.headers.get('set-cookie').split(';')[0];csrf=other.data.csrf;
+ assert.equal((await request('/leads/'+lead.id)).status,404);assert.equal((await request('/leads/'+lead.id,'PATCH',{action:'observation',notes:'Outra conta'})).status,404);
+});

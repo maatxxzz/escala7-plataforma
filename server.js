@@ -93,7 +93,7 @@ const server=http.createServer(async(req,res)=>{
     const s=session(req);if(!s)return json(res,401,{error:'Entre na sua conta para continuar.'});
     if(!['GET','HEAD'].includes(req.method)&&req.headers['x-csrf-token']!==s.csrf)return json(res,403,{error:'Sessão inválida. Atualize a página.'});
     if(p==='/api/logout'&&req.method==='POST'){db.prepare('DELETE FROM auth_sessions WHERE token_hash=?').run(s.token_hash);res.setHeader('Set-Cookie','escala_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return json(res,200,{ok:true});}
-    if(p==='/api/bootstrap'&&req.method==='GET')return json(res,200,{user:{name:s.name,email:s.email},csrf:s.csrf,demo:!!s.is_demo,leads:db.prepare('SELECT * FROM leads WHERE user_id=? ORDER BY next_date,id').all(s.user_id).map(vault.decode),activities:db.prepare('SELECT activities.*,leads.name,leads.company FROM activities JOIN leads ON leads.id=activities.lead_id WHERE activities.user_id=? ORDER BY activities.id DESC LIMIT 30').all(s.user_id).map(row=>({...row,name:vault.decode({user_id:row.user_id,name:row.name}).name,company:vault.decode({user_id:row.user_id,company:row.company}).company})),cadences,templates,learning:learningContent(db,s.user_id)});
+    if(p==='/api/bootstrap'&&req.method==='GET')return json(res,200,{user:{name:s.name,email:s.email},csrf:s.csrf,demo:!!s.is_demo,leads:db.prepare('SELECT * FROM leads WHERE user_id=? ORDER BY next_date,id').all(s.user_id).map(vault.decode),activities:db.prepare('SELECT activities.*,leads.name,leads.company FROM activities JOIN leads ON leads.id=activities.lead_id WHERE activities.user_id=? ORDER BY activities.id DESC LIMIT 30').all(s.user_id).map(row=>({...row,detail:row.kind==='observation'?vault.decode({user_id:row.user_id,notes:row.detail}).notes:row.detail,name:vault.decode({user_id:row.user_id,name:row.name}).name,company:vault.decode({user_id:row.user_id,company:row.company}).company})),cadences,templates,learning:learningContent(db,s.user_id)});
     if(p==='/api/account/password'&&req.method==='POST'){
       if(s.is_demo)return json(res,403,{error:'A demonstração não possui senha pessoal.'});
       if(!limit(db,'password:'+s.user_id,5))return json(res,429,{error:'Muitas tentativas. Aguarde 15 minutos.'});
@@ -120,6 +120,12 @@ const server=http.createServer(async(req,res)=>{
       const b=await body(req);const name=text(b.name,100,true),company=text(b.company,100,true),leadEmail=text(b.email||'',254),segment=text(b.segment,100,true);if(leadEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(leadEmail))return json(res,400,{error:'Informe um e-mail válido.'});if(!['E-mail','LinkedIn','WhatsApp','Telefone'].includes(b.channel)||!['A','B'].includes(b.cadence))return json(res,400,{error:'Canal ou cadência inválidos.'});const date=text(b.next_date,10,true);if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date)return json(res,400,{error:'Data inválida.'});const r=db.prepare('INSERT INTO leads(user_id,name,company,email,segment,stage,channel,cadence,next_date,notes,permission,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(s.user_id,vault.encode(s.user_id,'name',name),vault.encode(s.user_id,'company',company),vault.encode(s.user_id,'email',leadEmail),vault.encode(s.user_id,'segment',segment),'Novo lead',b.channel,b.cadence,date,vault.encode(s.user_id,'notes',text(b.notes||'',3000)),'pending',new Date().toISOString());activity(s.user_id,Number(r.lastInsertRowid),'created','Lead adicionado à carteira');return json(res,201,{id:Number(r.lastInsertRowid)});
     }
     const match=p.match(/^\/api\/leads\/(\d+)$/);
+    if(match&&req.method==='GET'){
+      const lead=db.prepare('SELECT * FROM leads WHERE id=? AND user_id=?').get(Number(match[1]),s.user_id);
+      if(!lead)return json(res,404,{error:'Lead não encontrado.'});
+      const history=db.prepare('SELECT * FROM activities WHERE lead_id=? AND user_id=? ORDER BY id DESC').all(lead.id,s.user_id).map(row=>({...row,detail:row.kind==='observation'?vault.decode({user_id:row.user_id,notes:row.detail}).notes:row.detail}));
+      return json(res,200,{lead:vault.decode(lead),history});
+    }
     if(match&&req.method==='PATCH'){
       const lead=db.prepare('SELECT * FROM leads WHERE id=? AND user_id=?').get(Number(match[1]),s.user_id);if(!lead)return json(res,404,{error:'Lead não encontrado.'});const b=await body(req);const action=b.action;
       if(action==='complete'){
@@ -131,6 +137,9 @@ const server=http.createServer(async(req,res)=>{
       }else if(action==='permission'){
         if(!['allowed','paused','blocked'].includes(b.permission))return json(res,400,{error:'Preferência inválida.'});
         db.prepare('UPDATE leads SET permission=?,stage=? WHERE id=? AND user_id=?').run(b.permission,b.permission==='allowed'?'Em conversa':'Pausado',lead.id,s.user_id);activity(s.user_id,lead.id,'preference',b.permission==='allowed'?'Permissão de contato registrada':b.permission==='blocked'?'Pedido de não contato registrado':'Contatos pausados');
+      }else if(action==='observation'){
+        const note=text(b.notes,3000,true);
+        activity(s.user_id,lead.id,'observation',vault.encode(s.user_id,'notes',note));
       }else if(action==='note'){
         const note=text(b.notes,3000,true);db.prepare('UPDATE leads SET notes=? WHERE id=? AND user_id=?').run(vault.encode(s.user_id,'notes',note),lead.id,s.user_id);activity(s.user_id,lead.id,'note','Contexto da conversa atualizado');
       }else return json(res,400,{error:'Ação inválida.'});

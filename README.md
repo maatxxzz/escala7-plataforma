@@ -23,7 +23,8 @@ Os testes usam uma base temporária e a porta 3197. Verificam autenticação, CS
 
 - Painel com indicadores derivados dos leads e registros reais da base.
 - Cadastro, busca, filtro e ficha de leads com contexto e histórico.
-- Cadências A (dias 1/3/5/7/10) e B (dias 0/2/5/8/12/16).
+- Cadências A (dias 1/3/5/7/10) e B (dias 0/2/5/8/12/16), em colunas por etapa, com cartões dos leads, contato, próxima data e preferência. Pausados e concluídos ficam em colunas próprias.
+- Página de cliente acessível pelo cartão ou pela lista de leads, com dados completos cadastrados, contexto editável e histórico integral daquele cliente. Observações são adicionadas individualmente, com data e hora, sem substituir as anteriores, e ficam criptografadas no banco. A URL com `#lead/ID` permite recarregar a ficha na mesma sessão.
 - Tarefas com checklist antes de registrar um contato e avançar a cadência.
 - Preferências de contato: pendente, permitido, pausado e não contatar. Apenas leads com permissão registrada podem concluir contatos.
 - Modelos de mensagem por canal, para copiar e personalizar.
@@ -45,7 +46,8 @@ A API foi criada para o navegador da aplicação, com sessão na mesma origem. N
 | POST | `/api/demo` | Sessão de demonstração, desativada em produção |
 | GET | `/api/bootstrap` | Usuário, token CSRF, leads, histórico, cadências e modelos |
 | POST | `/api/leads` | Cadastro de lead |
-| PATCH | `/api/leads/:id` | Ação `complete`, `permission` ou `note` |
+| GET | `/api/leads/:id` | Ficha e histórico completo do cliente da conta autenticada |
+| PATCH | `/api/leads/:id` | Ação `complete`, `permission`, `note` (contexto atual) ou `observation` (nova observação no histórico), com `notes` |
 | POST | `/api/logout` | Encerra sessão |
 | POST | `/api/account/password` | Altera senha e revoga outras sessões; exige senha atual |
 | POST | `/api/learning/:id/answer` | Corrige `{answer: índice}` e salva a conclusão após acerto |
